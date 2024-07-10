@@ -1,0 +1,104 @@
+################################################################################
+## RIC2Discover Visit Report (VR) Data Processing Functions
+## Authored by Dr. Ryan Selz Pralle, University of Wisconsin - Platteville
+## Version 1.0, 07/10/2024
+
+# This code is based on a MS Excel Macro authored by Dr. Lou Armentano,
+# professor emeritus at UW - Madison. It was later adapted to R by Dr. Guillermo
+# Martinez Boggio, during his Post Doctorate with Dr. Francisco Penagaricano at
+# UW - Madison. The present code is a significant upgrade that allows file
+# importing, filtering, and writing in batches.
+
+
+#INPUT: VR files from RIC2Discover or a similar system
+#OUTPUT: List of dataframes: raw, filtered, and summarized data
+
+#Custom function to read VR files
+read.VR <- function(x = Files) {
+  
+  #Dependent packages
+  require(dplyr)
+  require(tidyverse)
+  
+  #Files is a list of file names to be read by the function from the working directory
+  df <- read_csv(x, col_names = FALSE, col_types = cols(X1 = col_character())) %>% dplyr::select(c(-11:-16))
+  colnames(df) <- c('RFID', 'CowID', 'BinID', 'Time_Start', 'Time_End', 'Sec', 'Kg_Start', 'Kg_End', 'Feed', 'Intake_kg_asfed')
+  return(df)
+  
+}
+
+#Custom function to merge and filter VR files
+RIC2 <- function(dir_vr = NA, Date_Start = NA, Date_End = Sys.Date(), cows = NA, bins = NA, min_intake = 0, min_length = 0, dir_write = NA, writeFiles = F) {
+  
+  #Dependent packages
+  require(dplyr)
+  require(tidyverse)
+  
+  #Change to VR file directory
+  WD <- getwd()
+  if (!is.na(dir_vr)) {
+    setwd(dir = dir_vr)
+  }
+  
+  #Read VR files in directory
+  #Any non-VR files in the directory will make this fail
+  Files <- list.files('.', full.names = T, recursive = T)
+  Dates <- as.Date(str_match(Files, 'VR(\\d{6})\\.DAT$')[,2], format = '%y%m%d')
+  dat_raw <- map_df(Files, ~read.VR(.x), .id = 'VR_order')
+  dat_raw$Julian_Date <- as.Date(NA)
+  for (i in 1:length(Files)) {
+    dat_raw[which(dat_raw$VR_order == i), "Julian_Date"] <- as.Date(Dates[i])
+  }
+  dat_raw <- dat_raw[,-1] %>% select(Julian_Date, everything())
+  
+  #Initialize data for filtering
+  dat <- dat_raw
+  
+  #Order data by Julian Date, CowID, and meal time
+  dat <- dat[order(dat$Julian_Date, dat$CowID, dat$Time_Start), ]
+  
+  
+  #Filter by dates, only need Date_Start
+  if (!is.na(Date_Start)) {
+    Date_Start <- as.Date(Date_Start)
+    Date_End <- as.Date(Date_End)
+    dat <- dat[which(dat$Julian_Date >= Date_Start & dat$Julian_Date <= Date_End),]
+  }
+  
+  #Filter by cows
+  if (!is.na(cows)) {
+    dat <- dat[dat$CowID %in% cows, ]
+  }
+  
+  #Filter by bins
+  if (!is.na(bins)) {
+    dat <- dat[dat$BinID %in% bins, ]
+  }
+  
+  #Filter by minimum feed intake, requires a value
+  dat <- dat[dat$Intake_kg_asfed >= min_intake, ]
+  
+  #Filter by minimum visit length, requires a value
+  dat <- dat[dat$Intake_kg_asfed >= min_length, ]
+  
+  #Summarize data and write files
+  potentialDuplicates <- dat %>% dplyr::filter((lead(BinID) == BinID & lead(Time_Start) != Time_Start & as.numeric(lead(Time_End) - Sec, units = "secs") < 0) | (BinID == lag(BinID) & Time_Start != lag(Time_Start) & as.numeric(Time_End - lag(Sec), units = "secs") < 0))
+  dat_daily <- dat %>% group_by(Julian_Date, CowID, Feed) %>% summarize(Intake_kg_asfed = sum(Intake_kg_asfed), visit_count = sum(!is.na(Sec)), visit_time_sec = sum(Sec))
+  dat_filtered <- dat
+  
+  if (!is.na(dir_write)) {
+    setwd(dir = dir_write)
+  }
+  
+  if(writeFiles == T) {
+    write.csv(dat_daily, file = 'ric2_daily.csv', row.names = F, quote = F)
+    write.csv(dat_filtered, file = 'ric2_visits_filtered.csv', row.names = F, quote = F)
+    write.csv(dat_raw, file = 'ric2_visits_raw.csv', row.names = F, quote = F)
+    write.csv(potentialDuplicates, file = 'ric2_potentialDuplicates.csv', row.names = F, quote = F)
+  }
+  
+  setwd(dir = WD)
+  x <- list('daily' = dat_daily, 'VR_filtered' = dat_filtered, 'VR_raw' = dat_raw, 'DupCheck' = potentialDuplicates)
+  return(x)
+  
+}

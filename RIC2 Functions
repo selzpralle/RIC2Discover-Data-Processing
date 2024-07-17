@@ -8,7 +8,9 @@
 # Martinez Boggio, during his Post Doctorate with Dr. Francisco Penagaricano at
 # UW - Madison. The present code is a significant upgrade that allows file
 # importing, filtering, and writing in batches. Work is ongoing to implement
-# functions for routine quality control on a daily or weekly basis.
+# functions for routine quality control on a daily or weekly basis. In the
+# interim, we recommend Dr. Boggio's public repository: 
+# https://github.com/GMBog/GreenFeed-and-FeedIntakes
 
 
 ##########
